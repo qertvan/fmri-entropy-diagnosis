@@ -1,101 +1,104 @@
-# app.py - Simple Flask app for PyCharm
+# ==============================================================================
+# === app.py (Revised for Multi-Disease Support) ===============================
+# ==============================================================================
 from flask import Flask, request, jsonify, render_template_string
 import os
 import time
 import threading
 import uuid
-import random
 import numpy as np
+
+# Import our processing modules
 import fmri_processing
 import entropy_calculator
-
+import ml_predictor
 
 app = Flask(__name__)
-
-# Simple in-memory job storage
 jobs = {}
 
-# HTML template (embedded for simplicity)
+# --- Load ALL Machine Learning Models at Startup ---
+# This single line replaces the old try/except block.
+ml_predictor.load_all_models()
+
+# --- Redesigned HTML Template (with enabled dropdown) ---
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>fMRI Diagnosis - Sample</title>
+    <title>NeuroScope - fMRI Analysis</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
-        .container { max-width: 800px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .upload-area { border: 2px dashed #007bff; padding: 40px; text-align: center; border-radius: 10px; margin: 20px 0; }
-        .upload-area:hover { background: #f8f9ff; }
-        .btn { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
-        .btn:hover { background: #0056b3; }
-        .progress-bar { width: 100%; height: 20px; background: #e9ecef; border-radius: 10px; overflow: hidden; margin: 20px 0; }
-        .progress-fill { height: 100%; background: #007bff; width: 0%; transition: width 0.5s; }
-        .results { background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0; }
-        .prob-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin: 20px 0; }
-        .prob-card { background: white; padding: 20px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .prob-value { font-size: 24px; font-weight: bold; color: #007bff; }
-        .hidden { display: none; }
-        .status { margin: 10px 0; font-weight: bold; }
+        :root {
+            --primary-color: #3b82f6; --primary-hover: #2563eb; --bg-color: #f9fafb; --card-bg: #ffffff;
+            --text-dark: #1f2937; --text-light: #4b5563; --border-color: #e5e7eb;
+        }
+        body { font-family: 'Roboto', sans-serif; margin: 0; padding: 40px; background: var(--bg-color); color: var(--text-dark); }
+        .container { max-width: 700px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 40px; }
+        .header h1 { font-size: 36px; font-weight: 700; }
+        .header h1 span { color: var(--primary-color); }
+        .header p { font-size: 18px; color: var(--text-light); }
+        .card { background: var(--card-bg); padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); margin-bottom: 30px; }
+        .upload-area { border: 2px dashed var(--border-color); padding: 40px; text-align: center; border-radius: 10px; cursor: pointer; transition: background-color 0.2s; }
+        .upload-area:hover { background: #eff6ff; }
+        .upload-area h3 { margin: 0 0 10px 0; font-size: 20px; font-weight: 500; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 500; }
+        .form-group select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background-color: #ffffff; font-size: 16px; cursor: pointer; }
+        .btn { background: var(--primary-color); color: white; width: 100%; padding: 14px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 700; transition: background-color 0.2s; }
+        .btn:hover { background: var(--primary-hover); }
+        .processing-section, .results-section { display: none; }
+        .status-text { text-align: center; font-size: 18px; font-weight: 500; margin-bottom: 15px; }
+        .progress-bar { width: 100%; height: 12px; background: var(--border-color); border-radius: 6px; overflow: hidden; margin: 20px 0 10px 0; }
+        .progress-fill { height: 100%; background: var(--primary-color); width: 0%; transition: width 0.5s; }
+        .progress-text { text-align: center; color: var(--text-light); }
+        .results-header { text-align: center; margin-bottom: 30px; }
+        .results-header h4 { font-size: 20px; margin: 0; font-weight: 400; }
+        .results-header span { font-size: 28px; font-weight: 700; color: var(--primary-color); }
+        .results-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .result-bar { background: var(--bg-color); padding: 20px; border-radius: 8px; text-align: center; }
+        .result-bar .label { font-size: 16px; font-weight: 500; margin-bottom: 10px; }
+        .result-bar .value { font-size: 32px; font-weight: 700; }
+        #class0ProbValue { color: #10b981; } /* Generic ID for the first class (e.g., Healthy) */
+        #class1ProbValue { color: #ef4444; } /* Generic ID for the second class (e.g., SCZ) */
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🧠 NeuroScope</h1>
-        <p>Upload an fMRI file to get started (simulated processing for demo)</p>
-
-        <div class="upload-area" onclick="document.getElementById('fileInput').click()">
-            <h3>📁 Upload fMRI Data</h3>
-            <p>Click here to select a file</p>
-            <input type="file" id="fileInput" style="display: none;">
-        </div>
-
-        <div id="processingSection" class="hidden">
-            <h3>🔄 Processing...</h3>
-            <div class="status" id="statusText">Initializing...</div>
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill"></div>
+        <div class="header"><h1>🧠 Neuro<span>Scope</span></h1><p>Advanced fMRI analysis for diagnostic insights.</p></div>
+        <div id="uploadCard" class="card">
+            <!-- --- NEW: Enabled dropdown with values --- -->
+            <div class="form-group">
+                <label for="diseaseSelect">Analysis Target</label>
+                <select id="diseaseSelect">
+                    <option value="scz" selected>Schizophrenia vs. Healthy</option>
+                    <option value="adhd">ADHD vs. Healthy</option>
+                    <option value="bpd">Bipolar vs. Healthy</option>
+                </select>
             </div>
-            <div id="progressText">0%</div>
+            <div class="upload-area" onclick="document.getElementById('fileInput').click()"><h3>📁 Select fMRI File</h3><p>Click here to choose a preprocessed .nii.gz file</p><input type="file" id="fileInput" style="display: none;"></div>
         </div>
-
-        <div id="resultsSection" class="hidden">
-            <h3>🎯 Diagnosis Results</h3>
-            <div class="results">
-                <h4>Primary Diagnosis: <span id="primaryDiagnosis"></span></h4>
-                <p>Confidence: <span id="confidence"></span>%</p>
-
-                <div class="prob-grid">
-                    <div class="prob-card">
-                        <div class="prob-value" id="healthyProb">0%</div>
-                        <div>Healthy</div>
-                    </div>
-                    <div class="prob-card">
-                        <div class="prob-value" id="schizophreniaProb">0%</div>
-                        <div>Schizophrenia</div>
-                    </div>
-                    <div class="prob-card">
-                        <div class="prob-value" id="adhdProb">0%</div>
-                        <div>ADHD</div>
-                    </div>
-                    <div class="prob-card">
-                        <div class="prob-value" id="bipolarProb">0%</div>
-                        <div>Bipolar</div>
-                    </div>
-                </div>
+        <div id="processingSection" class="processing-section card"><div class="status-text" id="statusText">Initializing...</div><div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div><div class="progress-text" id="progressText">0%</div></div>
+        <div id="resultsSection" class="results-section card">
+            <div class="results-header"><h4>Primary Finding</h4><span id="primaryDiagnosis"></span></div>
+            <div class="results-grid">
+                <div class="result-bar"><div class="label" id="class0Label">Healthy</div><div class="value" id="class0ProbValue">0%</div></div>
+                <div class="result-bar"><div class="label" id="class1Label">Disease</div><div class="value" id="class1ProbValue">0%</div></div>
             </div>
-
-            <button class="btn" onclick="resetDemo()">Try Another File</button>
+            <button class="btn" onclick="resetDemo()" style="margin-top: 30px;">Analyze Another File</button>
         </div>
     </div>
-
     <script>
         let currentJobId = null;
-
         document.getElementById('fileInput').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (file) {
+                document.getElementById('uploadCard').style.display = 'none';
+                document.getElementById('processingSection').style.display = 'block';
                 uploadFile(file);
             }
         });
@@ -103,80 +106,56 @@ HTML_TEMPLATE = '''
         async function uploadFile(file) {
             const formData = new FormData();
             formData.append('file', file);
+            // --- NEW: Send the selected disease to the backend ---
+            const selectedDisease = document.getElementById('diseaseSelect').value;
+            formData.append('disease', selectedDisease);
 
             try {
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-
+                const response = await fetch('/upload', { method: 'POST', body: formData });
                 const data = await response.json();
                 currentJobId = data.job_id;
-
-                document.getElementById('processingSection').classList.remove('hidden');
                 checkStatus();
-
-            } catch (error) {
-                alert('Upload failed: ' + error.message);
-            }
+            } catch (error) { alert('Upload failed: ' + error.message); }
         }
 
         async function checkStatus() {
             if (!currentJobId) return;
-
             try {
                 const response = await fetch(`/status/${currentJobId}`);
                 const data = await response.json();
-
                 updateProgress(data.progress, data.status);
-
-                if (data.status === 'completed') {
-                    showResults(data.results);
-                } else if (data.status === 'error') {
-                    alert('Processing failed: ' + data.error);
-                } else {
-                    setTimeout(checkStatus, 1000);
-                }
-
-            } catch (error) {
-                console.error('Status check failed:', error);
-                setTimeout(checkStatus, 2000);
-            }
+                if (data.status === 'completed') { showResults(data.results); }
+                else if (data.status === 'error') { alert('Processing failed: ' + data.error); }
+                else { setTimeout(checkStatus, 1500); }
+            } catch (error) { console.error('Status check failed:', error); setTimeout(checkStatus, 2000); }
         }
 
         function updateProgress(progress, status) {
             document.getElementById('progressFill').style.width = progress + '%';
-            document.getElementById('progressText').textContent = progress + '%';
-            document.getElementById('statusText').textContent = getStatusText(status);
+            document.getElementById('progressText').textContent = Math.round(progress) + '%';
+            const statusMap = { 'preprocessing': 'Analyzing fMRI data structure...','custom_processing': 'Applying advanced signal processing (NiLearn)...','entropy': 'Extracting statistical features (Entropy)...','prediction': 'Running diagnostic prediction model...','completed': 'Analysis complete!'};
+            document.getElementById('statusText').textContent = statusMap[status] || 'Processing...';
         }
 
-        function getStatusText(status) {
-            const statusMap = {
-                'preprocessing': 'Running fMRIPrep preprocessing...',
-                'custom_processing': 'Custom preprocessing...',
-                'entropy': 'Calculating entropy features...',
-                'prediction': 'Running ML prediction...',
-                'completed': 'Analysis complete!'
-            };
-            return statusMap[status] || 'Processing...';
-        }
-
+        // --- NEW: Dynamic results display ---
         function showResults(results) {
-            document.getElementById('processingSection').classList.add('hidden');
-            document.getElementById('resultsSection').classList.remove('hidden');
+            document.getElementById('processingSection').style.display = 'none';
+            document.getElementById('resultsSection').style.display = 'block';
+
+            const [class0Name, class1Name] = results.class_names;
+            const class0Key = class0Name.toLowerCase();
+            const class1Key = class1Name.toLowerCase();
 
             document.getElementById('primaryDiagnosis').textContent = results.primary_diagnosis;
-            document.getElementById('confidence').textContent = results.confidence.toFixed(1);
-
-            document.getElementById('healthyProb').textContent = results.probabilities.healthy.toFixed(1) + '%';
-            document.getElementById('schizophreniaProb').textContent = results.probabilities.schizophrenia.toFixed(1) + '%';
-            document.getElementById('adhdProb').textContent = results.probabilities.adhd.toFixed(1) + '%';
-            document.getElementById('bipolarProb').textContent = results.probabilities.bipolar.toFixed(1) + '%';
+            document.getElementById('class0Label').textContent = class0Name;
+            document.getElementById('class1Label').textContent = class1Name;
+            document.getElementById('class0ProbValue').textContent = results.probabilities[class0Key].toFixed(1) + '%';
+            document.getElementById('class1ProbValue').textContent = results.probabilities[class1Key].toFixed(1) + '%';
         }
 
         function resetDemo() {
-            document.getElementById('processingSection').classList.add('hidden');
-            document.getElementById('resultsSection').classList.add('hidden');
+            document.getElementById('resultsSection').style.display = 'none';
+            document.getElementById('uploadCard').style.display = 'block';
             document.getElementById('fileInput').value = '';
             currentJobId = null;
         }
@@ -186,177 +165,72 @@ HTML_TEMPLATE = '''
 '''
 
 
-# Simulated processing functions (replace with your actual code)
-def simulate_fmriprep(filepath):
-    """Simulate fMRIPrep processing"""
-    time.sleep(2)  # Simulate processing time
-    return f"preprocessed_{filepath}"
-
-
-def simulate_preprocessing(filepath):
-    """Simulate your custom preprocessing"""
-    time.sleep(1.5)
-    return np.random.randn(1000, 100)  # Simulate processed data
-
-
-def simulate_entropy_calculation(data):
-    """Simulate your entropy calculation"""
-    time.sleep(1)
-    return np.random.randn(50)  # Simulate entropy features
-
-
-def simulate_ml_prediction(features):
-    """
-    Simulate ML prediction, but FIRST, let's inspect the features we received!
-    """
-    print("\n✅ --- ML Prediction Step Reached! --- ✅")
-    print(f"Data type of features received: {type(features)}")
-    print(f"Shape of the feature array: {features.shape}")
-
-    # Let's check for any non-finite values (NaNs or Infs)
-    if not np.all(np.isfinite(features)):
-        print("🚨 WARNING: The feature array contains non-finite (NaN or Inf) values!")
-    else:
-        print("👍 The feature array contains all finite numbers.")
-
-    # Print the first 10 entropy values to see what they look like
-    print(f"First 10 entropy features: {features[:10]}")
-
-    # The original simulation code can run after our checks
-    print("--- Now running the original simulation... ---")
-    time.sleep(1)
-    probs = np.random.dirichlet([2, 1, 1, 1])
-    diagnoses = ['Healthy', 'Schizophrenia', 'ADHD', 'Bipolar Disorder']
-    max_idx = np.argmax(probs)
-    return {
-        'primary_diagnosis': diagnoses[max_idx],
-        'confidence': probs[max_idx] * 100,
-        'probabilities': {
-            'healthy': probs[0] * 100,
-            'schizophrenia': probs[1] * 100,
-            'adhd': probs[2] * 100,
-            'bipolar': probs[3] * 100
-        }
-    }
-
-    # Generate realistic probabilities
-    probs = np.random.dirichlet([2, 1, 1, 1])  # Favor healthy
-
-    diagnoses = ['Healthy', 'Schizophrenia', 'ADHD', 'Bipolar Disorder']
-    max_idx = np.argmax(probs)
-
-    return {
-        'primary_diagnosis': diagnoses[max_idx],
-        'confidence': probs[max_idx] * 100,
-        'probabilities': {
-            'healthy': probs[0] * 100,
-            'schizophrenia': probs[1] * 100,
-            'adhd': probs[2] * 100,
-            'bipolar': probs[3] * 100
-        }
-    }
-
-
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
 
 
+# --- NEW: /upload route now accepts the selected disease ---
 @app.route('/upload', methods=['POST'])
 def upload_file():
     try:
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file uploaded'}), 400
-
+        if 'file' not in request.files: return jsonify({'error': 'No file uploaded'}), 400
         file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
+        disease_key = request.form.get('disease', 'scz')  # Default to 'scz' if not provided
+        if file.filename == '': return jsonify({'error': 'No file selected'}), 400
 
-        # Generate job ID
         job_id = str(uuid.uuid4())
-
-        # Save file (optional for demo)
         os.makedirs('uploads', exist_ok=True)
         filepath = os.path.join('uploads', file.filename)
         file.save(filepath)
 
-        # Initialize job
-        jobs[job_id] = {
-            'status': 'preprocessing',
-            'progress': 0,
-            'filepath': filepath
-        }
+        jobs[job_id] = {'status': 'preprocessing', 'progress': 0, 'filepath': filepath}
 
-        # Start processing in background
-        thread = threading.Thread(target=process_pipeline, args=(job_id,))
+        # Pass the disease_key to the processing thread
+        thread = threading.Thread(target=process_pipeline, args=(job_id, disease_key))
         thread.daemon = True
         thread.start()
-
         return jsonify({'job_id': job_id, 'message': 'Upload successful, processing started'})
-
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
-def process_pipeline(job_id):
-    """
-    Main processing pipeline - IN 'FAST CHECK' MODE
-    This skips fMRIPrep and uses pre-processed data from a dedicated test folder.
-    """
+# --- NEW: process_pipeline now accepts the disease_key ---
+def process_pipeline(job_id, disease_key):
     try:
-        # We still need the filepath variable, but we won't use it in this mode.
-        filepath = jobs[job_id]['filepath']
-
-        # === 'FAST CHECK' CONFIGURATION ===
-        print("🚀 RUNNING IN FAST CHECK MODE - Skipping fMRIPrep! 🚀")
-        # Set the path to the folder containing your preprocessed test data
+        print(f"🚀 RUNNING IN FAST CHECK MODE for disease: {disease_key.upper()} 🚀")
         preprocessed_data_dir = os.path.abspath('fast_check_data')
-        jobs[job_id].update({'status': 'preprocessing', 'progress': 35})  # Pretend fMRIPrep is done
-        # =================================
+        jobs[job_id].update({'status': 'custom_processing', 'progress': 10})
 
-        # Step 2: Custom NiLearn processing (This will run for real)
-        # We pass the path to our 'fast_check_data' folder.
-        jobs[job_id].update({'status': 'custom_processing', 'progress': 40})
         final_processed_file = fmri_processing.run_nilearn_processing(preprocessed_data_dir, job_id)
-        jobs[job_id]['progress'] = 70
+        jobs[job_id].update({'status': 'entropy', 'progress': 40})
 
-        # Step 3: Entropy calculation (This will run for real)
-        jobs[job_id].update({'status': 'entropy', 'progress': 75})
         entropy_features = entropy_calculator.calculate_entropy_features(final_processed_file)
-        jobs[job_id]['progress'] = 90
+        jobs[job_id].update({'status': 'prediction', 'progress': 80})
 
-        # Step 4: Inspect the results
-        results = simulate_ml_prediction(entropy_features)
+        # Pass the disease_key to the prediction function
+        results = ml_predictor.run_ml_prediction(entropy_features, disease_key)
 
-        # Complete
+        time.sleep(2)
         jobs[job_id].update({'status': 'completed', 'progress': 100, 'results': results})
 
     except Exception as e:
-        # The enhanced error block to catch any failures
         import traceback
-        print("\n" + "=" * 80)
-        print("🚨🚨🚨 AN ERROR OCCURRED IN THE PIPELINE! 🚨🚨🚨")
+        print("\n" + "=" * 80);
+        print("🚨🚨🚨 AN ERROR OCCURRED IN THE PIPELINE! 🚨🚨🚨");
         print("=" * 80)
         traceback.print_exc()
-        print("=" * 80 + "\n")
-
-        jobs[job_id].update({
-            'status': 'error',
-            'error': str(e)
-        })
+        print("=" * 80 + "\n");
+        jobs[job_id].update({'status': 'error', 'error': str(e)})
 
 
 @app.route('/status/<job_id>')
 def get_status(job_id):
-    if job_id not in jobs:
-        return jsonify({'error': 'Job not found'}), 404
-
+    if job_id not in jobs: return jsonify({'error': 'Job not found'}), 404
     return jsonify(jobs[job_id])
 
 
 if __name__ == '__main__':
-    print("🧠 fMRI Diagnosis Sample Server Starting...")
+    print("🧠 NeuroScope Server Starting...")
     print("📍 Open your browser to: http://localhost:5001")
-    print("🔄 Upload any file to see the simulated processing!")
-
     app.run(debug=True, host='localhost', port=5001)
