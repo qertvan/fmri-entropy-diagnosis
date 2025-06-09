@@ -1,0 +1,25 @@
+# Python virtual environment
+.venv/
+venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# IDE/Editor specific files
+.idea/
+.vscode/
+
+# macOS specific files
+.DS_Store
+
+# Large data and output folders
+# We do NOT want to upload gigabytes of data to GitHub
+outputs/
+uploads/
+bids_input/
+fast_check_data/
+
+# You can add specific files you don't want to upload
+# For example, if your license is private:
+# license.txt
