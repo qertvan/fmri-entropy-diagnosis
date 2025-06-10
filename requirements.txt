@@ -1,0 +1,18 @@
+# requirements.txt
+#
+# This file lists the Python packages required to run the project.
+# These versions are compatible with Python 3.12.
+# Install them using: pip install -r requirements.txt
+
+# --- Core Web Application & Server ---
+Flask==3.0.3      # Used in app.py to create the web server, handle requests, and return JSON responses.
+
+# --- Data Handling & Scientific Computing ---
+numpy==1.26.4     # Essential in all scripts for the fundamental numerical data structure (arrays) and mathematical operations.
+pandas==2.2.2     # Used in the fMRI processing pipeline and entropy calculation, especially for reading and managing .tsv and .csv files.
+scipy==1.13.1     # Used in fmri_processing.py for interpolating data to fill gaps created after scrubbing noisy timepoints.
+
+# --- fMRI Data Analysis & Neuroimaging ---
+nilearn==0.10.4   # The central library in fmri_processing.py and entropy_calculator.py for processing, cleaning, and filtering fMRI data and extracting ROI time-series.
+nibabel==5.2.1    # A core dependency for nilearn that provides the ability to read and write neuroimaging file formats like .nii.gz.
+antropy==0.1.9 # Used in entropy_calculator.py to compute various entropy metrics, such as sample entropy, on time-series data.

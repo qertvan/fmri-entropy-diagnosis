@@ -24,8 +24,8 @@ def clean_and_organize_fmriprep_output(source_fmriprep_dir, target_clean_dir, su
 
     # Define the files we want to find and keep
     file_patterns = [
-        f"sub-{subject_id}*_desc-confounds_timeseries.tsv",
-        f"sub-{subject_id}*_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz"
+        f"sub-{subject_id}*task-rest_bold_confounds.tsv",
+        f"sub-{subject_id}*_space-MNI152NLin2009cAsym_preproc.nii.gz"
     ]
 
     found_files = []
@@ -194,8 +194,13 @@ def run_nilearn_processing(input_data_dir, job_id, subject_id='01', tr=2.0):
     # --- THIS LOGIC IS NOW MORE FLEXIBLE ---
     # Find the bold and confounds files directly within the given input directory
     # It will work for both the 'preproc_clean' folder and our new 'fast_check_data' folder.
-    bold_files = glob.glob(os.path.join(input_data_dir, f'*_preproc_bold.nii.gz'))
-    confounds_files = glob.glob(os.path.join(input_data_dir, f'*_confounds_timeseries.tsv'))
+    # Hem .nii.gz hem de .nii uzantılı BOLD dosyalarını ara
+    bold_nii_gz_files = glob.glob(os.path.join(input_data_dir, '*.nii.gz'))
+    bold_nii_files = glob.glob(os.path.join(input_data_dir, '*.nii'))
+    bold_files = bold_nii_gz_files + bold_nii_files  # İki listeyi birleştir
+
+    # Adı _confounds.tsv ile biten confounds dosyasını bul
+    confounds_files = glob.glob(os.path.join(input_data_dir, '*_confounds.tsv'))
 
     if not bold_files: raise FileNotFoundError(f"BOLD file not found in input directory: {input_data_dir}")
     if not confounds_files: raise FileNotFoundError(f"Confounds file not found in input directory: {input_data_dir}")

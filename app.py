@@ -1,260 +1,218 @@
-# app.py - Simple Flask app for PyCharm
+# app.py - Updated for fMRI Diagnosis Workflow
 from flask import Flask, request, jsonify, render_template_string
 import os
 import time
 import threading
 import uuid
-import random
-import numpy as np
 import fmri_processing
 import entropy_calculator
-
+import run_ml_models  # YENİ
 
 app = Flask(__name__)
 
-# Simple in-memory job storage
+# Basit, bellek-içi iş depolaması
 jobs = {}
 
-# HTML template (embedded for simplicity)
+# --- YENİ HTML ARAYÜZÜ ---
+# Kullanıcının hastalık ve veri türü seçmesine olanak tanır
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>fMRI Diagnosis - Sample</title>
+    <title>NeuroScope AI</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
         .container { max-width: 800px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .upload-area { border: 2px dashed #007bff; padding: 40px; text-align: center; border-radius: 10px; margin: 20px 0; }
+        h1, h2, h3 { color: #333; }
+        .form-section { margin-bottom: 25px; }
+        label { display: block; font-weight: bold; margin-bottom: 8px; }
+        select, .file-input { width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #ccc; }
+        .radio-group label { display: inline-block; margin-right: 20px; font-weight: normal;}
+        .upload-area { border: 2px dashed #007bff; padding: 30px; text-align: center; border-radius: 10px; margin-top: 15px; cursor: pointer; }
         .upload-area:hover { background: #f8f9ff; }
-        .btn { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        .btn { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; width: 100%; }
         .btn:hover { background: #0056b3; }
         .progress-bar { width: 100%; height: 20px; background: #e9ecef; border-radius: 10px; overflow: hidden; margin: 20px 0; }
-        .progress-fill { height: 100%; background: #007bff; width: 0%; transition: width 0.5s; }
+        .progress-fill { height: 100%; background: #28a745; width: 0%; transition: width 0.5s; }
         .results { background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0; }
-        .prob-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin: 20px 0; }
-        .prob-card { background: white; padding: 20px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .prob-value { font-size: 24px; font-weight: bold; color: #007bff; }
         .hidden { display: none; }
         .status { margin: 10px 0; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🧠 NeuroScope</h1>
-        <p>Upload an fMRI file to get started (simulated processing for demo)</p>
+        <h1>🧠 NeuroScope AI</h1>
+        <p>Analyze fMRI data to predict neurological conditions.</p>
 
-        <div class="upload-area" onclick="document.getElementById('fileInput').click()">
-            <h3>📁 Upload fMRI Data</h3>
-            <p>Click here to select a file</p>
-            <input type="file" id="fileInput" style="display: none;">
-        </div>
+        <form id="uploadForm">
+            <div class="form-section">
+                <label for="diseaseSelect">1. Select Suspected Condition</label>
+                <select id="diseaseSelect" name="selected_disease">
+                    <option value="SCZ">Schizophrenia</option>
+                    <option value="ADHD">ADHD</option>
+                    <option value="BPD">Bipolar Disorder</option>
+                </select>
+            </div>
+
+            <div class="form-section">
+                <label>2. Select Data Type</label>
+                <div class="radio-group">
+                    <label><input type="radio" name="processing_mode" value="full" checked> Raw fMRI File (.nii or .nii.gz)</label>
+                    <label><input type="radio" name="processing_mode" value="preprocessed"> Pre-processed Files</label>
+                </div>
+            </div>
+
+            <div id="raw-upload" class="upload-area" onclick="document.getElementById('rawFileInput').click();">
+                <h3>📁 Upload Raw fMRI Data</h3>
+                <p>Click to select a single .nii or .nii.gz file</p>
+                <input type="file" id="rawFileInput" name="raw_file" class="hidden">
+                <span id="rawFileName">No file selected</span>
+            </div>
+
+            <div id="preprocessed-upload" class="hidden">
+                <div class="upload-area" onclick="document.getElementById('boldFile').click();">
+                    <h3>...preproc_bold.nii.gz</h3>
+                    <input type="file" id="boldFile" name="bold_file" class="hidden">
+                    <span id="boldFileName">No file selected</span>
+                </div>
+                <div class="upload-area" onclick="document.getElementById('confoundsFile').click();" style="margin-top:10px;">
+                    <h3>...confounds.tsv</h3>
+                    <input type="file" id="confoundsFile" name="confounds_file" class="hidden">
+                    <span id="confoundsFileName">No file selected</span>
+                </div>
+            </div>
+
+            <div style="margin-top:30px;">
+                <button type="submit" class="btn">Start Analysis</button>
+            </div>
+        </form>
 
         <div id="processingSection" class="hidden">
-            <h3>🔄 Processing...</h3>
+            <h3>🔄 Processing... Please wait.</h3>
             <div class="status" id="statusText">Initializing...</div>
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill"></div>
-            </div>
+            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
             <div id="progressText">0%</div>
         </div>
 
         <div id="resultsSection" class="hidden">
             <h3>🎯 Diagnosis Results</h3>
-            <div class="results">
-                <h4>Primary Diagnosis: <span id="primaryDiagnosis"></span></h4>
-                <p>Confidence: <span id="confidence"></span>%</p>
-
-                <div class="prob-grid">
-                    <div class="prob-card">
-                        <div class="prob-value" id="healthyProb">0%</div>
-                        <div>Healthy</div>
-                    </div>
-                    <div class="prob-card">
-                        <div class="prob-value" id="schizophreniaProb">0%</div>
-                        <div>Schizophrenia</div>
-                    </div>
-                    <div class="prob-card">
-                        <div class="prob-value" id="adhdProb">0%</div>
-                        <div>ADHD</div>
-                    </div>
-                    <div class="prob-card">
-                        <div class="prob-value" id="bipolarProb">0%</div>
-                        <div>Bipolar</div>
-                    </div>
-                </div>
-            </div>
-
-            <button class="btn" onclick="resetDemo()">Try Another File</button>
+            <div class="results" id="resultsContent"></div>
+            <button class="btn" onclick="resetDemo()">Analyze Another File</button>
         </div>
     </div>
 
-    <script>
-        let currentJobId = null;
+<script>
+    let currentJobId = null;
 
-        document.getElementById('fileInput').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (file) {
-                uploadFile(file);
-            }
+    // --- Form ve Dosya Yükleme Arayüzü Mantığı ---
+    const form = document.getElementById('uploadForm');
+    const rawUploadDiv = document.getElementById('raw-upload');
+    const preprocessedUploadDiv = document.getElementById('preprocessed-upload');
+
+    document.querySelectorAll('input[name="processing_mode"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            rawUploadDiv.classList.toggle('hidden', this.value !== 'full');
+            preprocessedUploadDiv.classList.toggle('hidden', this.value !== 'preprocessed');
         });
+    });
 
-        async function uploadFile(file) {
-            const formData = new FormData();
-            formData.append('file', file);
+    // Dosya isimlerini gösterme
+    document.getElementById('rawFileInput').addEventListener('change', e => { document.getElementById('rawFileName').textContent = e.target.files[0]?.name || 'No file selected'; });
+    document.getElementById('boldFile').addEventListener('change', e => { document.getElementById('boldFileName').textContent = e.target.files[0]?.name || 'No file selected'; });
+    document.getElementById('confoundsFile').addEventListener('change', e => { document.getElementById('confoundsFileName').textContent = e.target.files[0]?.name || 'No file selected'; });
 
-            try {
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                });
+    // Form gönderimini ele alma
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
 
-                const data = await response.json();
-                currentJobId = data.job_id;
+        const formData = new FormData(form);
+        const processingMode = formData.get('processing_mode');
 
-                document.getElementById('processingSection').classList.remove('hidden');
-                checkStatus();
+        // Dosya kontrolü
+        if (processingMode === 'full' && !formData.get('raw_file')?.name) {
+            alert('Please select a raw fMRI file.'); return;
+        }
+        if (processingMode === 'preprocessed' && (!formData.get('bold_file')?.name || !formData.get('confounds_file')?.name)) {
+            alert('Please select both the bold and confounds files.'); return;
+        }
 
-            } catch (error) {
-                alert('Upload failed: ' + error.message);
+        try {
+            const response = await fetch('/upload', { method: 'POST', body: formData });
+            if (!response.ok) throw new Error(`Server error: ${response.statusText}`);
+
+            const data = await response.json();
+            currentJobId = data.job_id;
+
+            form.classList.add('hidden');
+            document.getElementById('processingSection').classList.remove('hidden');
+            checkStatus();
+
+        } catch (error) {
+            alert('Upload failed: ' + error.message);
+        }
+    });
+
+    async function checkStatus() {
+        if (!currentJobId) return;
+        try {
+            const response = await fetch(`/status/${currentJobId}`);
+            const data = await response.json();
+
+            updateProgress(data.progress, data.status_text);
+
+            if (data.status === 'completed') {
+                showResults(data.results);
+            } else if (data.status === 'error') {
+                alert('Processing failed: ' + data.error);
+                resetDemo();
+            } else {
+                setTimeout(checkStatus, 2000); // 2 saniyede bir kontrol et
             }
+        } catch (error) {
+            console.error('Status check failed:', error);
+            setTimeout(checkStatus, 5000); // Hata durumunda daha uzun bekle
         }
+    }
 
-        async function checkStatus() {
-            if (!currentJobId) return;
+    function updateProgress(progress, status) {
+        document.getElementById('progressFill').style.width = progress + '%';
+        document.getElementById('progressText').textContent = Math.round(progress) + '%';
+        document.getElementById('statusText').textContent = status;
+    }
 
-            try {
-                const response = await fetch(`/status/${currentJobId}`);
-                const data = await response.json();
+    function showResults(results) {
+        document.getElementById('processingSection').classList.add('hidden');
+        document.getElementById('resultsSection').classList.remove('hidden');
+        const disease = Object.keys(results.probabilities).find(k => k !== 'healthy');
 
-                updateProgress(data.progress, data.status);
+        const content = `
+            <h4>Primary Diagnosis: <span style="color: #007bff;">${results.primary_diagnosis}</span></h4>
+            <p>Confidence: <strong>${results.confidence.toFixed(1)}%</strong></p>
+            <hr>
+            <h4>Probability Distribution</h4>
+            <p>Healthy: ${results.probabilities.healthy.toFixed(1)}%</p>
+            <p>${disease}: ${results.probabilities[disease].toFixed(1)}%</p>
+        `;
+        document.getElementById('resultsContent').innerHTML = content;
+    }
 
-                if (data.status === 'completed') {
-                    showResults(data.results);
-                } else if (data.status === 'error') {
-                    alert('Processing failed: ' + data.error);
-                } else {
-                    setTimeout(checkStatus, 1000);
-                }
-
-            } catch (error) {
-                console.error('Status check failed:', error);
-                setTimeout(checkStatus, 2000);
-            }
-        }
-
-        function updateProgress(progress, status) {
-            document.getElementById('progressFill').style.width = progress + '%';
-            document.getElementById('progressText').textContent = progress + '%';
-            document.getElementById('statusText').textContent = getStatusText(status);
-        }
-
-        function getStatusText(status) {
-            const statusMap = {
-                'preprocessing': 'Running fMRIPrep preprocessing...',
-                'custom_processing': 'Custom preprocessing...',
-                'entropy': 'Calculating entropy features...',
-                'prediction': 'Running ML prediction...',
-                'completed': 'Analysis complete!'
-            };
-            return statusMap[status] || 'Processing...';
-        }
-
-        function showResults(results) {
-            document.getElementById('processingSection').classList.add('hidden');
-            document.getElementById('resultsSection').classList.remove('hidden');
-
-            document.getElementById('primaryDiagnosis').textContent = results.primary_diagnosis;
-            document.getElementById('confidence').textContent = results.confidence.toFixed(1);
-
-            document.getElementById('healthyProb').textContent = results.probabilities.healthy.toFixed(1) + '%';
-            document.getElementById('schizophreniaProb').textContent = results.probabilities.schizophrenia.toFixed(1) + '%';
-            document.getElementById('adhdProb').textContent = results.probabilities.adhd.toFixed(1) + '%';
-            document.getElementById('bipolarProb').textContent = results.probabilities.bipolar.toFixed(1) + '%';
-        }
-
-        function resetDemo() {
-            document.getElementById('processingSection').classList.add('hidden');
-            document.getElementById('resultsSection').classList.add('hidden');
-            document.getElementById('fileInput').value = '';
-            currentJobId = null;
-        }
-    </script>
+    function resetDemo() {
+        document.getElementById('processingSection').classList.add('hidden');
+        document.getElementById('resultsSection').classList.add('hidden');
+        form.reset();
+        form.classList.remove('hidden');
+        rawUploadDiv.classList.remove('hidden');
+        preprocessedUploadDiv.classList.add('hidden');
+        document.getElementById('rawFileName').textContent = 'No file selected';
+        document.getElementById('boldFileName').textContent = 'No file selected';
+        document.getElementById('confoundsFileName').textContent = 'No file selected';
+        currentJobId = null;
+    }
+</script>
 </body>
 </html>
 '''
-
-
-# Simulated processing functions (replace with your actual code)
-def simulate_fmriprep(filepath):
-    """Simulate fMRIPrep processing"""
-    time.sleep(2)  # Simulate processing time
-    return f"preprocessed_{filepath}"
-
-
-def simulate_preprocessing(filepath):
-    """Simulate your custom preprocessing"""
-    time.sleep(1.5)
-    return np.random.randn(1000, 100)  # Simulate processed data
-
-
-def simulate_entropy_calculation(data):
-    """Simulate your entropy calculation"""
-    time.sleep(1)
-    return np.random.randn(50)  # Simulate entropy features
-
-
-def simulate_ml_prediction(features):
-    """
-    Simulate ML prediction, but FIRST, let's inspect the features we received!
-    """
-    print("\n✅ --- ML Prediction Step Reached! --- ✅")
-    print(f"Data type of features received: {type(features)}")
-    print(f"Shape of the feature array: {features.shape}")
-
-    # Let's check for any non-finite values (NaNs or Infs)
-    if not np.all(np.isfinite(features)):
-        print("🚨 WARNING: The feature array contains non-finite (NaN or Inf) values!")
-    else:
-        print("👍 The feature array contains all finite numbers.")
-
-    # Print the first 10 entropy values to see what they look like
-    print(f"First 10 entropy features: {features[:10]}")
-
-    # The original simulation code can run after our checks
-    print("--- Now running the original simulation... ---")
-    time.sleep(1)
-    probs = np.random.dirichlet([2, 1, 1, 1])
-    diagnoses = ['Healthy', 'Schizophrenia', 'ADHD', 'Bipolar Disorder']
-    max_idx = np.argmax(probs)
-    return {
-        'primary_diagnosis': diagnoses[max_idx],
-        'confidence': probs[max_idx] * 100,
-        'probabilities': {
-            'healthy': probs[0] * 100,
-            'schizophrenia': probs[1] * 100,
-            'adhd': probs[2] * 100,
-            'bipolar': probs[3] * 100
-        }
-    }
-
-    # Generate realistic probabilities
-    probs = np.random.dirichlet([2, 1, 1, 1])  # Favor healthy
-
-    diagnoses = ['Healthy', 'Schizophrenia', 'ADHD', 'Bipolar Disorder']
-    max_idx = np.argmax(probs)
-
-    return {
-        'primary_diagnosis': diagnoses[max_idx],
-        'confidence': probs[max_idx] * 100,
-        'probabilities': {
-            'healthy': probs[0] * 100,
-            'schizophrenia': probs[1] * 100,
-            'adhd': probs[2] * 100,
-            'bipolar': probs[3] * 100
-        }
-    }
 
 
 @app.route('/')
@@ -263,100 +221,114 @@ def index():
 
 
 @app.route('/upload', methods=['POST'])
-def upload_file():
+def upload_file_handler():
     try:
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file uploaded'}), 400
+        processing_mode = request.form.get('processing_mode')
+        selected_disease = request.form.get('selected_disease')
 
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
+        if not processing_mode or not selected_disease:
+            return jsonify({'error': 'Missing form data'}), 400
 
-        # Generate job ID
         job_id = str(uuid.uuid4())
+        job_dir = os.path.join('uploads', job_id)
+        os.makedirs(job_dir, exist_ok=True)
 
-        # Save file (optional for demo)
-        os.makedirs('uploads', exist_ok=True)
-        filepath = os.path.join('uploads', file.filename)
-        file.save(filepath)
-
-        # Initialize job
-        jobs[job_id] = {
-            'status': 'preprocessing',
-            'progress': 0,
-            'filepath': filepath
+        job_info = {
+            'status': 'queued', 'progress': 0, 'status_text': 'Job is queued...',
+            'processing_mode': processing_mode, 'selected_disease': selected_disease, 'filepaths': {}
         }
 
-        # Start processing in background
+        if processing_mode == 'full':
+            file = request.files.get('raw_file')
+            if not file or file.filename == '': return jsonify({'error': 'No raw file uploaded'}), 400
+
+            raw_filepath = os.path.join(job_dir, file.filename)
+            file.save(raw_filepath)
+            job_info['filepaths']['raw'] = raw_filepath
+
+        elif processing_mode == 'preprocessed':
+            bold_file = request.files.get('bold_file')
+            confounds_file = request.files.get('confounds_file')
+
+            if not bold_file or not confounds_file: return jsonify(
+                {'error': 'Both preprocessed files are required'}), 400
+
+            preproc_input_dir = os.path.join(job_dir, 'preproc_input')
+            os.makedirs(preproc_input_dir, exist_ok=True)
+
+            bold_filepath = os.path.join(preproc_input_dir, bold_file.filename)
+            confounds_filepath = os.path.join(preproc_input_dir, confounds_file.filename)
+            bold_file.save(bold_filepath)
+            confounds_file.save(confounds_filepath)
+            job_info['filepaths']['preproc_dir'] = preproc_input_dir
+
+        jobs[job_id] = job_info
         thread = threading.Thread(target=process_pipeline, args=(job_id,))
         thread.daemon = True
         thread.start()
 
-        return jsonify({'job_id': job_id, 'message': 'Upload successful, processing started'})
+        return jsonify({'job_id': job_id, 'message': 'Processing started'})
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
 def process_pipeline(job_id):
-    """
-    Main processing pipeline - IN 'FAST CHECK' MODE
-    This skips fMRIPrep and uses pre-processed data from a dedicated test folder.
-    """
+    job_info = jobs[job_id]
+    processing_mode = job_info['processing_mode']
+    selected_disease = job_info['selected_disease']
+
+    def update_status(status, progress, text):
+        jobs[job_id].update({'status': status, 'progress': progress, 'status_text': text})
+
     try:
-        # We still need the filepath variable, but we won't use it in this mode.
-        filepath = jobs[job_id]['filepath']
+        nilearn_input_dir = None
 
-        # === 'FAST CHECK' CONFIGURATION ===
-        print("🚀 RUNNING IN FAST CHECK MODE - Skipping fMRIPrep! 🚀")
-        # Set the path to the folder containing your preprocessed test data
-        preprocessed_data_dir = os.path.abspath('fast_check_data')
-        jobs[job_id].update({'status': 'preprocessing', 'progress': 35})  # Pretend fMRIPrep is done
-        # =================================
+        if processing_mode == 'full':
+            # --- Adım 1: fMRIPrep (Eğer ham veri yüklendiyse) ---
+            update_status('fmriprep', 5, 'Starting fMRIPrep... this may take a very long time.')
+            raw_filepath = job_info['filepaths']['raw']
+            # NOT: run_fmriprep'in çıktısı 'preproc_clean' klasörünün yolu olmalıdır.
+            nilearn_input_dir = fmri_processing.run_fmriprep(raw_filepath, job_id)
+            update_status('fmriprep', 40, 'fMRIPrep completed.')
 
-        # Step 2: Custom NiLearn processing (This will run for real)
-        # We pass the path to our 'fast_check_data' folder.
-        jobs[job_id].update({'status': 'custom_processing', 'progress': 40})
-        final_processed_file = fmri_processing.run_nilearn_processing(preprocessed_data_dir, job_id)
-        jobs[job_id]['progress'] = 70
+        elif processing_mode == 'preprocessed':
+            # --- Adım 1: fMRIPrep atlanır ---
+            update_status('nilearn', 40, 'fMRIPrep skipped. Starting post-processing.')
+            nilearn_input_dir = job_info['filepaths']['preproc_dir']
 
-        # Step 3: Entropy calculation (This will run for real)
-        jobs[job_id].update({'status': 'entropy', 'progress': 75})
+        # --- Adım 2: NiLearn ile Son İşleme ---
+        update_status('nilearn', 50, 'Running NiLearn post-processing...')
+        final_processed_file = fmri_processing.run_nilearn_processing(nilearn_input_dir, job_id)
+        update_status('nilearn', 70, 'NiLearn processing complete.')
+
+        # --- Adım 3: Entropi Özelliklerini Hesaplama ---
+        update_status('entropy', 75, 'Calculating entropy features...')
         entropy_features = entropy_calculator.calculate_entropy_features(final_processed_file)
-        jobs[job_id]['progress'] = 90
+        update_status('entropy', 90, 'Entropy calculation complete.')
 
-        # Step 4: Inspect the results
-        results = simulate_ml_prediction(entropy_features)
+        # --- Adım 4: Makine Öğrenmesi ile Tahmin ---
+        update_status('prediction', 95, f'Running prediction model for {selected_disease}...')
+        results = run_ml_models.run_prediction(entropy_features, selected_disease)
 
-        # Complete
-        jobs[job_id].update({'status': 'completed', 'progress': 100, 'results': results})
+        # --- Bitiş ---
+        update_status('completed', 100, 'Analysis complete!')
+        jobs[job_id]['results'] = results
 
     except Exception as e:
-        # The enhanced error block to catch any failures
         import traceback
-        print("\n" + "=" * 80)
-        print("🚨🚨🚨 AN ERROR OCCURRED IN THE PIPELINE! 🚨🚨🚨")
-        print("=" * 80)
+        print(f"\n--- PIPELINE ERROR for job {job_id} ---")
         traceback.print_exc()
-        print("=" * 80 + "\n")
-
-        jobs[job_id].update({
-            'status': 'error',
-            'error': str(e)
-        })
+        print("--- END ERROR ---")
+        jobs[job_id].update({'status': 'error', 'error': str(e)})
 
 
 @app.route('/status/<job_id>')
 def get_status(job_id):
-    if job_id not in jobs:
-        return jsonify({'error': 'Job not found'}), 404
-
-    return jsonify(jobs[job_id])
+    return jsonify(jobs.get(job_id, {'error': 'Job not found', 'status': 'error'}))
 
 
 if __name__ == '__main__':
-    print("🧠 fMRI Diagnosis Sample Server Starting...")
-    print("📍 Open your browser to: http://localhost:5001")
-    print("🔄 Upload any file to see the simulated processing!")
-
     app.run(debug=True, host='localhost', port=5001)
