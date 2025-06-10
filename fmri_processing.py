@@ -194,8 +194,8 @@ def run_nilearn_processing(input_data_dir, job_id, subject_id='01', tr=2.0):
     # --- THIS LOGIC IS NOW MORE FLEXIBLE ---
     # Find the bold and confounds files directly within the given input directory
     # It will work for both the 'preproc_clean' folder and our new 'fast_check_data' folder.
-    bold_files = glob.glob(os.path.join(input_data_dir, f'*_preproc_bold.nii.gz'))
-    confounds_files = glob.glob(os.path.join(input_data_dir, f'*_confounds_timeseries.tsv'))
+    bold_files = glob.glob(os.path.join(input_data_dir, f'*-preproc_bold.nii.gz'))
+    confounds_files = glob.glob(os.path.join(input_data_dir, f'*-confounds_timeseries.tsv'))
 
     if not bold_files: raise FileNotFoundError(f"BOLD file not found in input directory: {input_data_dir}")
     if not confounds_files: raise FileNotFoundError(f"Confounds file not found in input directory: {input_data_dir}")

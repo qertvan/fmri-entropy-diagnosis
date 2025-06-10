@@ -10,7 +10,7 @@ LOADED_MODELS = {}
 # --- Central configuration for all diseases (No changes here) ---
 DISEASE_CONFIG = {
     'scz': {
-        'model_path': 'model_healthy_vs_scz.joblib',
+        'model_path': 'model_healthy_vs_scz2.joblib',
         'class_names': ['Healthy', 'Schizophrenia'],
         'feature_names': ["ROI_86_SaEn", "ROI_144_SaEn", "ROI_188_SaEn", "ROI_129_FuEn", "ROI_168_DiffEn",
                           "ROI_264_FuEn", "ROI_253_RaEn", "ROI_214_SaEn", "ROI_258_DiffEn", "ROI_209_RaEn",
@@ -22,11 +22,11 @@ DISEASE_CONFIG = {
                           "ROI_242_DiffEn", "ROI_25_SaEn", "ROI_73_DiffEn", "ROI_127_RaEn", "ROI_96_DiffEn",
                           "ROI_6_DiffEn"]
     },
-    'adhd': {'model_path': 'model_healthy_vs_adhd.joblib', 'class_names': ['Healthy', 'ADHD'],
+    'adhd': {'model_path': 'model_healthy_vs_adhd2.joblib', 'class_names': ['Healthy', 'ADHD'],
              'feature_names': ["ROI_86_SaEn", "ROI_144_SaEn", "ROI_188_SaEn", "ROI_129_FuEn", "ROI_168_DiffEn",
                                "ROI_264_FuEn", "ROI_253_RaEn", "ROI_214_SaEn", "ROI_258_DiffEn", "ROI_209_RaEn",
                                "ROI_232_RaEn", "ROI_209_SaEn", "ROI_181_RaEn", "ROI_24_SaEn", "ROI_21_FuEn"]},
-    'bpd': {'model_path': 'model_healthy_vs_bpd.joblib', 'class_names': ['Healthy', 'Bipolar'], 'feature_names': 'all'}
+    'bpd': {'model_path': 'model_healthy_vs_bpd2.joblib', 'class_names': ['Healthy', 'Bipolar'], 'feature_names': 'all'}
 }
 
 
@@ -107,7 +107,6 @@ def run_ml_prediction(all_features, disease_key):
     # --- Step 2: Apply the loaded scaler ---
     # We use .transform() ONLY. We DO NOT use .fit() or .fit_transform() here.
     scaled_features = scaler.transform(features_2d)
-
     # --- UPDATED DEBUGGING LOGS ---
     print("\n" + "=" * 50)
     print("--- DEBUGGING ML PREDICTION STEP ---")
