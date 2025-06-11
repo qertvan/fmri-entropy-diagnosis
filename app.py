@@ -342,7 +342,7 @@ HTML_TEMPLATE = '''
     </div>
     <div class="container" id="mainContainer">
         <div class="header">
-            <img src="/static/brain-chip.png" alt="brain icon" style="width:68px; margin-bottom: 10px;" />
+            <img src="static/logo.png" alt="NeuroScope Logo" style="height: 60px;">
             <h1>Neuro<span>Scope</span></h1>
             <p>Advanced fMRI analysis for diagnostic insights.</p>
         </div>
