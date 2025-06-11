@@ -130,10 +130,10 @@ def calculate_entropy_features(nilearn_processed_path, t_r=2.0):
     # Create column headers for the CSV file
     n_rois = len(saen_values)
     headers = (
-            [f"sample_entropy_roi_{i + 1}" for i in range(n_rois)] +
-            [f"differential_entropy_roi_{i + 1}" for i in range(n_rois)] +
-            [f"fuzzy_entropy_roi_{i + 1}" for i in range(n_rois)] +
-            [f"range_entropy_roi_{i + 1}" for i in range(n_rois)]
+            [f"ROI_{i + 1}_SaEn" for i in range(n_rois)] +
+            [f"ROI_{i + 1}_DiffEn" for i in range(n_rois)] +
+            [f"ROI_{i + 1}_FuEn" for i in range(n_rois)] +
+            [f"ROI_{i + 1}_RaEn" for i in range(n_rois)]
     )
 
     # Convert the numpy array to a pandas DataFrame
@@ -142,7 +142,7 @@ def calculate_entropy_features(nilearn_processed_path, t_r=2.0):
 
     # Define where to save the CSV file
     output_dir = os.path.dirname(nilearn_processed_path)
-    csv_path = os.path.join(output_dir, 'entropy_features.csv')
+    csv_path = os.path.join(output_dir, 'yeni_hasta_DUZELTILMIS.csv')
 
     # Save the DataFrame to a CSV file
     features_df.to_csv(csv_path, index=False)
@@ -150,4 +150,4 @@ def calculate_entropy_features(nilearn_processed_path, t_r=2.0):
     # -----------------------------------------------
 
     # Return the features as before
-    return np.nan_to_num(all_features)
+    return csv_path
