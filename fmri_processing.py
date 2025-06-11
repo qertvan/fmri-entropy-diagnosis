@@ -1,7 +1,7 @@
 import os
 import shutil
 import subprocess
-import glob  # Added for the cleaning step
+import glob
 import numpy as np
 import pandas as pd
 import nibabel as nib
@@ -11,49 +11,8 @@ from nilearn.signal import clean
 from nilearn.datasets import load_mni152_template
 
 
-# =================================================================================
-# === NEW HELPER FUNCTION FOR CLEANING (Adapted from your script) =================
-# =================================================================================
-def clean_and_organize_fmriprep_output(source_fmriprep_dir, target_clean_dir, subject_id):
-    """
-    Finds the essential files from the raw fMRIPrep output and copies them
-    to a new, clean directory for the next pipeline step.
-    """
-    print("\n--- Starting fMRIPrep Output Cleaning Step ---")
-    os.makedirs(target_clean_dir, exist_ok=True)
-
-    # Define the files we want to find and keep
-    file_patterns = [
-        f"sub-{subject_id}*_desc-confounds_timeseries.tsv",
-        f"sub-{subject_id}*_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz"
-    ]
-
-    found_files = []
-    for pattern in file_patterns:
-        # Search recursively inside the source fMRIPrep directory
-        search_path = os.path.join(source_fmriprep_dir, '**', pattern)
-        matching_files = glob.glob(search_path, recursive=True)
-
-        if not matching_files:
-            raise FileNotFoundError(
-                f"Cleaning step failed: Could not find any files matching pattern '{pattern}' inside {source_fmriprep_dir}")
-
-        # Copy the found file to the clean directory
-        for file_path in matching_files:
-            filename = os.path.basename(file_path)
-            destination = os.path.join(target_clean_dir, filename)
-
-            # Using copy is safer than move, as it leaves the original fMRIPrep output intact for debugging
-            shutil.copy(file_path, destination)
-            print(f"Copied essential file to: {destination}")
-            found_files.append(destination)
-
-    print("✅ Cleaning step complete.")
-    return found_files
-
-
 # ==============================================================================
-# === PART 1: FMRIPREP FUNCTION (MODIFIED FOR BIDS DIR) ========================
+# =========================== FMRIPREP FUNCTION ================================
 # ==============================================================================
 
 def run_fmriprep(bids_dir, job_id):
@@ -80,7 +39,6 @@ def run_fmriprep(bids_dir, job_id):
     try:
         subprocess.run(command, check=True, capture_output=True, text=True)
         print("fMRIPrep completed successfully.")
-        # --- Clean output ---
         raw_fmriprep_dir = os.path.join(output_dir, 'fmriprep')
         clean_preproc_dir = os.path.join(output_dir, 'preproc_clean')
         found_files = clean_and_organize_fmriprep_output(
@@ -88,7 +46,6 @@ def run_fmriprep(bids_dir, job_id):
             target_clean_dir=clean_preproc_dir,
             subject_id='01'
         )
-        # Find the cleaned files
         bold_files = glob.glob(os.path.join(clean_preproc_dir, '*preproc_bold.nii.gz'))
         confounds_files = glob.glob(os.path.join(clean_preproc_dir, '*confounds_timeseries.tsv'))
         if not bold_files or not confounds_files:
@@ -104,19 +61,57 @@ def run_fmriprep(bids_dir, job_id):
         raise e
 
 
+def clean_and_organize_fmriprep_output(source_fmriprep_dir, target_clean_dir, subject_id):
+    """
+    Finds the essential files from the raw fMRIPrep output and copies them
+    to a new, clean directory for the next pipeline step.
+    """
+    print("\n--- Starting fMRIPrep Output Cleaning Step ---")
+    os.makedirs(target_clean_dir, exist_ok=True)
+
+    file_patterns = [
+        f"sub-{subject_id}*_desc-confounds_timeseries.tsv",
+        f"sub-{subject_id}*_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz"
+    ]
+
+    found_files = []
+    for pattern in file_patterns:
+        search_path = os.path.join(source_fmriprep_dir, '**', pattern)
+        matching_files = glob.glob(search_path, recursive=True)
+
+        if not matching_files:
+            raise FileNotFoundError(
+                f"Cleaning step failed: Could not find any files matching pattern '{pattern}' inside {source_fmriprep_dir}")
+
+        for file_path in matching_files:
+            filename = os.path.basename(file_path)
+            destination = os.path.join(target_clean_dir, filename)
+
+            shutil.copy(file_path, destination)
+            print(f"Copied essential file to: {destination}")
+            found_files.append(destination)
+
+    print("✅ Cleaning step complete.")
+    return found_files
+
+
 # ==============================================================================
-# === PART 2: NILEARN PROCESSING FUNCTIONS (MODIFIED) ==========================
+# ========================== PROCESSING FUNCTIONS ==============================
 # ==============================================================================
 
-# --- (Helper functions like scrub_fd, interpolate_scrubbed, etc., are unchanged) ---
 def load_data(bold_path, confounds_path):
+    """
+    Loads the BOLD image in NIfTI format and the confounds file in TSV format.
+    """
     img = nib.load(bold_path)
     confounds_df = pd.read_csv(confounds_path, sep='\t')
     return img, confounds_df
 
 
-# ... (all other helper functions remain the same) ...
 def scrub_fd(data, confounds_df, threshold=0.2):
+    """
+    Identifies high-motion time points using Framewise Displacement (FD).
+    """
     fd = confounds_df['FramewiseDisplacement'].fillna(0).values
     bad_trs = np.where(fd > threshold)[0]
     scrub_idx = set()
@@ -126,6 +121,9 @@ def scrub_fd(data, confounds_df, threshold=0.2):
 
 
 def interpolate_scrubbed(data, scrub_idx, affine, header):
+    """
+    Interpolates the data at marked time points using data from adjacent points.
+    """
     n_voxels = np.prod(data.shape[:3])
     flat_data = data.reshape((n_voxels, data.shape[3]))
     good_indices = np.setdiff1d(np.arange(data.shape[3]), scrub_idx)
@@ -140,6 +138,9 @@ def interpolate_scrubbed(data, scrub_idx, affine, header):
 
 
 def get_nuisance_regressors(confounds_df):
+    """
+    Selects a specific subset of nuisance regressors from the confounds DataFrame.
+    """
     base_cols = ['X', 'Y', 'Z', 'RotX', 'RotY', 'RotZ', 'WhiteMatter', 'GlobalSignal']
     compcor_cols = [col for col in confounds_df.columns if col.startswith("a_comp_cor_")][:5]
     selected_cols = base_cols + compcor_cols
@@ -148,21 +149,33 @@ def get_nuisance_regressors(confounds_df):
 
 
 def regress_out(img, confounds_df, tr):
+    """
+    Mathematically removes the effect of nuisance regressors from the fMRI signal.
+    """
     nuisance_regressors = get_nuisance_regressors(confounds_df)
     return clean_img(img, confounds=nuisance_regressors.values, detrend=True, standardize=False, t_r=tr)
 
 
 def smooth_image(img, fwhm=6):
+    """
+    Applies Gaussian smoothing to the image.
+    """
     return smooth_img(img, fwhm=fwhm)
 
 
 def bandpass_filter(img, tr, low_pass=0.08, high_pass=0.009):
+    """
+    Applies a band-pass filter to the fMRI signal.
+    """
     data_filtered = clean(img.get_fdata(), t_r=tr, low_pass=low_pass, high_pass=high_pass, detrend=False,
                           standardize=False)
     return new_img_like(img, data_filtered)
 
 
 def cleanup_temp_files(output_dir, filenames):
+    """
+    Deletes temporary files in the specified directory.
+    """
     for fname in filenames:
         path = os.path.join(output_dir, fname)
         if os.path.exists(path):
@@ -170,10 +183,12 @@ def cleanup_temp_files(output_dir, filenames):
             print(f"Cleaned up temporary file: {fname}")
 
 
-# --- MAIN NILEARN FUNCTION (UPDATED FOR FLEXIBILITY) ---
 def run_nilearn_processing(input_data, job_id, tsv_path=None, tr=2.0):
     """
-    If input_data is a directory, auto-find bold/confounds files. If it's a file, use it directly (tsv_path required).
+    Runs a full nilearn post-processing pipeline on fMRIPrep outputs.
+
+    This main function executes the denoising steps (scrubbing, interpolation,
+    regression), resampling, smoothing, and filtering in the specified order.
     Returns the final processed bold file path.
     """
     print("\n--- Starting NiLearn Post-Processing Step ---")
@@ -191,14 +206,14 @@ def run_nilearn_processing(input_data, job_id, tsv_path=None, tr=2.0):
             raise ValueError("tsv_path is required when input_data is a file path.")
         bold_path = input_data
         confounds_path = tsv_path
-    # Output dir
+        
     main_output_dir = os.path.abspath(f'outputs/{job_id}')
     nilearn_output_dir = os.path.join(main_output_dir, 'nilearn_output')
     os.makedirs(nilearn_output_dir, exist_ok=True)
     print(f"\nProcessing files from: {input_data}")
     print(f"Input BOLD: {bold_path}")
     print(f"Output Dir: {nilearn_output_dir}")
-    # Pipeline
+
     img, confounds_df = load_data(bold_path, confounds_path)
     data = img.get_fdata()
     scrub_idx = scrub_fd(data, confounds_df)
