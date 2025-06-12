@@ -15,19 +15,18 @@ NeuroScope is a proof-of-concept web application built with Flask that provides 
 
 ```
 .
-├── app.py                  # The main Flask application file
-├── fmri_processing.py      # Module for fMRIPrep and NiLearn processing
-├── entropy_calculator.py   # Module for calculating entropy features
-├── ml_predictor.py         # Module for loading models and running predictions
-├── models/                   # Directory to store pre-trained model files (.pkl)
-│   ├── scz_model.pkl
-│   ├── adhd_model.pkl
-│   └── bpd_model.pkl
-├── static/                   # Directory for static assets like logos
+├── app.py                    # The main Flask application file
+├── fmri_processing.py        # Module for fMRIPrep and NiLearn post-processing
+├── entropy_calculator.py     # Module for calculating entropy features
+├── ml_predictor.py           # Module for loading models and running predictions
+├── models/                   # Directory to store pre-trained model files (.joblib)
+│   ├── final_model_ADHD.joblib
+│   ├── final_model_BPD.joblib
+│   └── final_model_SCZ.joblib
+├── static/                   # Directory for logo
 │   └── logo.png
-├── templates/                # (Optional) For separate HTML files
-├── uploads/                  # Temporary directory for user-uploaded files (auto-created)
-└── requirements.txt        # Python package dependencies
+├── uploads/                  # Temporary directory for user-uploaded files
+└── requirements.txt          # Python package dependencies
 ```
 
 ## Setup and Installation
